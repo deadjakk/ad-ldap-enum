@@ -15,6 +15,13 @@ import argparse
 
 from collections import deque
 
+from pyasn1.codec.der import decoder
+from impacket import version
+from impacket.dcerpc.v5.samr import UF_ACCOUNTDISABLE, UF_NORMAL_ACCOUNT
+from impacket.examples import logger
+from impacket.ldap import ldap, ldapasn1
+from impacket.smbconnection import SMBConnection
+
 class ADUser(object):
     """A representation of a user in Active Directory. Class variables are instantiated to a 'safe'
        state so when the object is used during processing it can be assumed that all properties have
@@ -340,7 +347,7 @@ def process_group(users_dictionary, groups_dictionary, computers_dictionary, gro
 
     return group_dictionary
 
-def query_ldap_with_paging(ldap_client, base_dn, search_filter, attributes, output_object=None, page_size=1000):
+def query_ldap_with_paging(ldap_client, base_dn, search_filter, passed_attributes, output_object=None, page_size=1000):
     """Get all the Active Directory results from LDAP using a paging approach.
        By default Active Directory will return 1,000 results per query before it errors out."""
 
@@ -348,32 +355,16 @@ def query_ldap_with_paging(ldap_client, base_dn, search_filter, attributes, outp
     more_pages = True
     output_array = deque()
 
-    # Paging for AD LDAP Queries
-    ldap_control = ldap.controls.SimplePagedResultsControl(True, size=page_size, cookie='')
+    # TODO: Fix items with membership;range settings. Impacket appears to throw an error breaking this workflow.
+    sc = ldap.SimplePagedResultsControl()
+    result_data = ldap_client.search(searchFilter=search_filter, attributes=passed_attributes, sizeLimit=0, searchControls = [sc])
 
-    while more_pages:
-        # Query the LDAP Server
-        msgid = ldap_client.search_ext(base_dn, ldap.SCOPE_SUBTREE, search_filter, attributes, serverctrls=[ldap_control])
-        result_type, result_data, message_id, server_controls = ldap_client.result3(msgid)
-
-        # Append Page to Results
-        for element in result_data:
-            if (output_object is None) and (element[0] is not None):
-                output_array.append(element[1])
-            elif (output_object is not None) and (element[0] is not None):
-                output_array.append(output_object(element[1]))
-
-       # Get the page control and get the cookie from the control.
-        page_controls = [c for c in server_controls if c.controlType == ldap.controls.SimplePagedResultsControl.controlType]
-
-        if page_controls:
-            cookie = page_controls[0].cookie
-
-        # If there is no cookie then all the pages have been retrieved.
-        if not cookie:
-            more_pages = False
-        else:
-            ldap_control.cookie = cookie
+    # Append Page to Results
+    for element in result_data:
+        if (output_object is None) and (element[0] is not None):
+            output_array.append(element[1])
+        elif (output_object is not None) and (element[0] is not None):
+            output_array.append(output_object(element[1]))
 
     return output_array
 
@@ -402,10 +393,11 @@ if __name__ == '__main__':
     server_group.add_argument('-a', '--alt-domain', dest='alt_domain', help='Alternative FQDN to use as the Base DN for searching LDAP.')
     server_group.add_argument('-e', '--nested', dest='nested_groups', action='store_true', help='Expand nested groups.')
     authentication_group = parser.add_argument_group('Authentication Parameters')
-    authentication_group.add_argument('-n', '--null', dest='null_session', action='store_true', help='Use a null binding to authenticate to LDAP.')
+    authentication_group.add_argument('--null', dest='null_session', action='store_true', help='Use a null binding to authenticate to LDAP.')
     authentication_group.add_argument('-s', '--secure', dest='secure_comm', action='store_true', help='Connect to LDAP over SSL')
     authentication_group.add_argument('-u', '--username', dest='username', help='Authentication account\'s username.')
     authentication_group.add_argument('-p', '--password', dest='password', help='Authentication account\'s password.')
+    authentication_group.add_argument('--hashes', dest='hashes', help='NTLM hashes, format is LMHASH:NTHASH')
     parser.add_argument('-v', '--verbose', dest='verbosity', action='store_true', help='Display debugging information.')
     parser.add_argument('-o', '--prepend', dest='filename_prepend', default='', help='Prepend a string to all output file names.')
     args = parser.parse_args()
@@ -416,36 +408,17 @@ if __name__ == '__main__':
     else:
         logLevel = 20
 
+    # Parse hashes
+    lm_hash = ''
+    nt_hash = ''
+
+    if args.hashes is not None:
+        hash_split_string = args.hashes.split(':')
+        lm_hash = hash_split_string[0]
+        nt_hash = hash_split_string[1]
+
+    # Start logging
     logging.basicConfig(format='%(asctime)-19s %(levelname)-8s %(message)s', datefmt='%Y-%m-%d %H:%M:%S', level=logLevel)
-
-    try:
-        # Connect to LDAP
-        if args.secure_comm:
-            ldap.set_option(ldap.OPT_X_TLS_REQUIRE_CERT, ldap.OPT_X_TLS_ALLOW)
-            ldap_client = ldap.initialize('ldaps://{0}'.format(args.ldap_server))
-        else:
-            ldap_client = ldap.initialize('ldap://{0}'.format(args.ldap_server))
-
-        logging.debug('Connecting to LDAP server at [%s]', ldap_client.get_option(ldap.OPT_URI))
-
-        ldap_client.set_option(ldap.OPT_REFERRALS, ldap.OPT_OFF)
-        ldap_client.protocol_version = 3
-
-        # LDAP Authentication
-        if args.null_session is True:
-            ldap_client.simple_bind_s()
-        else:
-            fully_qualified_username = '{0}@{1}'.format(args.username, args.domain)
-            ldap_client.simple_bind_s(fully_qualified_username, args.password)
-    except ldap.INVALID_CREDENTIALS, e:
-        ldap_client.unbind()
-        logging.error('Incorrect username or password')
-        logging.debug(e)
-        sys.exit(0)
-    except ldap.SERVER_DOWN, e:
-        logging.error('LDAP server is unavailable')
-        logging.debug(e)
-        sys.exit(0)
 
     # Build the baseDN
     if args.alt_domain:
@@ -455,6 +428,28 @@ if __name__ == '__main__':
 
     base_dn = 'dc={0}'.format(formatted_domain_name)
     logging.debug('Using BaseDN of [%s]', base_dn)
+
+    try:
+        # Connect to LDAP
+        if args.secure_comm:
+            ldap_client = ldap.LDAPConnection('ldaps://{0}{1}{2}'.format(args.ldap_server, formatted_domain_name))
+        else:
+            ldap_client = ldap.LDAPConnection('ldap://{0}'.format(args.ldap_server, formatted_domain_name))
+
+        logging.debug('Connecting to LDAP server at [%s]', args.ldap_server)
+
+        # LDAP Authentication
+        if args.null_session is True:
+            #ldap_client.simple_bind_s()
+        else:
+            ldapConnection.login(args.username, args.password, args.domain, lm_hash, nt_hash)
+
+    except ldap.LDAPSessionError, e:
+        logging.error('Impacket LDAP error.')
+        logging.debug(e)
+        sys.exit(0)
+
+
 
     # Query LDAP
     ldap_queries(ldap_client, base_dn, args.nested_groups)
