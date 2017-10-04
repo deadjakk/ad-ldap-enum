@@ -149,7 +149,6 @@ class ADGroup(object):
     sam_account_name = ''
     primary_group_token = ''
     members = []
-    is_large_group = False
 
     def __init__(self, retrieved_attributes):
         if 'distinguishedName' in retrieved_attributes:
@@ -158,10 +157,6 @@ class ADGroup(object):
             self.sam_account_name = retrieved_attributes['sAMAccountName'][0]
         if 'primaryGroupToken' in retrieved_attributes:
             self.primary_group_token = retrieved_attributes['primaryGroupToken'][0]
-        if 'member' in retrieved_attributes:
-            self.members = retrieved_attributes['member']
-        if any(dictionary_key.startswith('member;range') for dictionary_key in retrieved_attributes.keys()):
-            self.is_large_group = True
 
 def ldap_queries(ldap_client, base_dn, explode_nested_groups):
     """Main worker function for the script."""
@@ -175,7 +170,7 @@ def ldap_queries(ldap_client, base_dn, explode_nested_groups):
     user_attributes = ['distinguishedName', 'sAMAccountName', 'userAccountControl', 'primaryGroupID', 'comment', 'description', 'homeDirectory', 'displayName', 'mail', 'pwdLastSet', 'lastLogon', 'profilePath', 'lockoutTime', 'scriptPath']
 
     group_filter = '(objectcategory=group)'
-    group_attributes = ['distinguishedName', 'sAMAccountName', 'member', 'primaryGroupToken']
+    group_attributes = ['distinguishedName', 'sAMAccountName', 'primaryGroupToken']
 
     computer_filters = '(objectcategory=computer)'
     computer_attributes = ['distinguishedName', 'sAMAccountName', 'primaryGroupID', 'operatingSystem', 'operatingSystemHotfix', 'operatingSystemServicePack', 'operatingSystemVersion']
@@ -202,143 +197,90 @@ def ldap_queries(ldap_client, base_dn, explode_nested_groups):
     for element in computers:
         computers_dictionary[element.distinguished_name] = element
 
-    # Loop through each group. If the membership is a range then query AD to get the full group membership
-    logging.info('Exploding large groups')
-    for group_key, group_object in groups_dictionary.iteritems():
-        if group_object.is_large_group:
-            logging.debug('Getting full membership for [%s]', group_key)
-            groups_dictionary[group_key].members = get_membership_with_ranges(ldap_client, base_dn, group_key)
-
-    # Build group membership
-    logging.info('Building group membership')
+    # Loop through each group. Query Active Directory to get the full group membership
+    logging.info('Querying group membership')
     logging.info('There is a total of [%i] groups', len(groups_dictionary.keys()))
-
     current_group_number = 0
-    _output_dictionary = []
-    for grp in groups_dictionary.keys():
+    for group_key, group_object in groups_dictionary.iteritems():
+        logging.debug('Getting full membership for [%s]', group_key)
         current_group_number += 1
-        _output_dictionary += process_group(users_dictionary, groups_dictionary, computers_dictionary, grp, explode_nested_groups, None, [])
+        groups_dictionary[group_key].members = get_membership_with_ranges(ldap_client, base_dn, group_key, group_object.primary_group_token, explode_nested_groups)
 
-        if current_group_number % 1000 == 0:
+        if current_group_number % 500 == 0:
             logging.info('Processing group [%i]', current_group_number)
 
-    # TODO: This could create output duplicates. It should be fixed at some point.
-    # Add users if they have the group set as their primary ID as the group.
-    # Additionally, add extended domain user information to a text file.
+    # Add Domain Users and their extended information to a file.
     user_information_filename = '{0} Extended Domain User Information.tsv'.format(args.filename_prepend).strip()
     with open(user_information_filename, 'w') as user_information_file:
         logging.info('Writing domain user information to [%s]', user_information_file.name)
         user_information_file.write('SAM Account Name\tStatus\tLocked Out\tDisplay Name\tEmail\tHome Directory\tProfile Path\tLogon Script Path\tPassword Last Set\tLast Logon\tUser Comment\tDescription\n')
 
         for user_object in users_dictionary.values():
-            if user_object.primary_group_id and user_object.primary_group_id in group_id_to_dn_dictionary:
-                grp_dn = group_id_to_dn_dictionary[user_object.primary_group_id]
+            user_information_file.write(user_object.sam_account_name + '\t')
+            user_information_file.write(user_object.get_account_flags() + '\t')
+            user_information_file.write(user_object.locked_out + '\t')
+            user_information_file.write(user_object.display_name + '\t')
+            user_information_file.write(user_object.mail + '\t')
+            user_information_file.write(user_object.home_directory + '\t')
+            user_information_file.write(user_object.profile_path + '\t')
+            user_information_file.write(user_object.logon_script + '\t')
+            user_information_file.write(user_object.get_password_last_set_date() + '\t')
+            user_information_file.write(user_object.get_last_logon_date() + '\t')
+            user_information_file.write(user_object.comment + '\t')
+            user_information_file.write(user_object.description + '\n')
 
-                temp_list_a = []
-                temp_list_b = []
-
-                temp_list_a.append(groups_dictionary[grp_dn].sam_account_name)
-                temp_list_b.append(groups_dictionary[grp_dn].sam_account_name)
-                temp_list_a.append(user_object.sam_account_name)
-                temp_list_b.append(user_object.sam_account_name)
-                temp_list_a.append(user_object.get_account_flags())
-                temp_list_b.append(user_object.get_account_flags())
-                temp_list_a.append(user_object.locked_out)
-                temp_list_a.append(user_object.display_name)
-                temp_list_a.append(user_object.mail)
-                temp_list_a.append(user_object.home_directory)
-                temp_list_a.append(user_object.profile_path)
-                temp_list_a.append(user_object.logon_script)
-                temp_list_a.append(user_object.get_password_last_set_date())
-                temp_list_a.append(user_object.get_last_logon_date())
-                temp_list_a.append(user_object.comment)
-                temp_list_a.append(user_object.description)
-                _output_dictionary.append(temp_list_b)
-
-                user_information_file.write('\t'.join(temp_list_a[1:]) + '\n')
-
-    # Write Domain Computer Information
+    # Write Domain Computers and their extended information to a file.
     computer_information_filename = '{0} Extended Domain Computer Information.tsv'.format(args.filename_prepend).strip()
     with open(computer_information_filename, 'w') as computer_information_file:
         logging.info('Writing domain computer information to [%s]', computer_information_file.name)
         computer_information_file.write('SAM Account Name\tOS\tOS Hotfix\tOS Service Pack\tOS Version\n')
 
-        # TODO: This could create output duplicates. It should be fixed at some point.
-        # Add computers if they have the group set as their primary ID as the group
         for computer_object in computers_dictionary.values():
-            if computer_object.primary_group_id:
-                grp_dn = group_id_to_dn_dictionary[computer_object.primary_group_id]
-
-                temp_list_a = []
-                temp_list_b = []
-
-                temp_list_a.append(groups_dictionary[grp_dn].sam_account_name)
-                temp_list_a.append(computer_object.sam_account_name)
-
-                temp_list_b.append(computer_object.sam_account_name)
-                temp_list_b.append(computer_object.operating_system)
-                temp_list_b.append(computer_object.operating_system_hotfix)
-                temp_list_b.append(computer_object.operating_system_service_pack)
-                temp_list_b.append(computer_object.operating_system_version)
-
-                computer_information_file.write('\t'.join(temp_list_b) + '\n')
-                _output_dictionary.append(temp_list_a)
+            computer_information_file.write(computer_object.sam_account_name + '\t')
+            computer_information_file.write(computer_object.operating_system + '\t')
+            computer_information_file.write(computer_object.operating_system_hotfix + '\t')
+            computer_information_file.write(computer_object.operating_system_service_pack + '\t')
+            computer_information_file.write(computer_object.operating_system_version + '\n')
 
     # Write Group Memberships
     group_membership_filename = '{0} Domain Group Membership.tsv'.format(args.filename_prepend).strip()
     with open(group_membership_filename, 'w') as group_membership_file:
         logging.info('Writing membership information to [%s]', group_membership_file.name)
-        group_membership_file.write('Group Name\tSAM Account Name\tStatus\n')
+        group_membership_file.write('Group Name\tSAM Account Name\tType\tStatus\n')
 
-        for element in _output_dictionary:
-            group_membership_file.write('\t'.join(element) + '\n')
+        for group_object in groups_dictionary.values():
 
-def process_group(users_dictionary, groups_dictionary, computers_dictionary, group_distinguished_name, explode_nested, base_group_name, groups_seen):
-    """Builds group membership for a specified group."""
-    # Store assorted group information.
-    group_dictionary = []
+            if not group_object.members:
+                group_membership_file.write(group_object.sam_account_name + '\t')
+                group_membership_file.write('\t')
+                group_membership_file.write('Group\n')
 
-    # Query SAM name or used redefined SAM name if processing a nested group.
-    if base_group_name is None:
-        group_sam_name = groups_dictionary[group_distinguished_name].sam_account_name
-    elif base_group_name is not None:
-        group_sam_name = base_group_name
+            else:
+                for memberof_member in group_object.members:
+                    # Process users
+                    if memberof_member in users_dictionary:
+                        user_member = users_dictionary[memberof_member]
 
-    # Add empty groups to the Domain Group Membership list for full visibility.
-    if not groups_dictionary[group_distinguished_name].members:
-        temp_list = [group_sam_name, '']
-        group_dictionary.append(temp_list)
+                        group_membership_file.write(group_object.sam_account_name + '\t')
+                        group_membership_file.write(user_member.sam_account_name + '\t')
+                        group_membership_file.write('User\t')
+                        group_membership_file.write(user_member.get_account_flags() + '\n')
 
-    # Add users/groups/computer if they are a 'memberOf' the group
-    for member in groups_dictionary[group_distinguished_name].members:
-        # Process users.
-        if member in users_dictionary:
-            user_member = users_dictionary[member]
+                    # Process computers.
+                    elif memberof_member in computers_dictionary:
+                        computer_member = computers_dictionary[memberof_member]
 
-            temp_list = [group_sam_name, user_member.sam_account_name, user_member.get_account_flags()]
-            group_dictionary.append(temp_list)
+                        group_membership_file.write(group_object.sam_account_name + '\t')
+                        group_membership_file.write(computer_member.sam_account_name + '\t')
+                        group_membership_file.write('Computer\n')
 
-        # Process computers.
-        elif member in computers_dictionary:
-            temp_list = [group_sam_name, computers_dictionary[member].sam_account_name]
-            group_dictionary.append(temp_list)
+                    # Process groups.
+                    elif memberof_member in groups_dictionary:
+                        group_member = groups_dictionary[memberof_member]
 
-        # Process groups.
-        elif member in groups_dictionary:
-            if not explode_nested or (explode_nested and base_group_name is None):
-                temp_list = [group_sam_name, groups_dictionary[member].sam_account_name]
-                group_dictionary.append(temp_list)
-
-            if explode_nested:
-                # Stop processing the chain if a circular reference is detected.
-                if member in groups_seen:
-                    pass
-                # Process a nested group.
-                else:
-                    groups_seen.append(member)
-                    group_dictionary += process_group(users_dictionary, groups_dictionary, computers_dictionary, member, True, group_sam_name, groups_seen)
-
-    return group_dictionary
+                        group_membership_file.write(group_object.sam_account_name + '\t')
+                        group_membership_file.write(group_member.sam_account_name + '\t')
+                        group_membership_file.write('Group\n')
 
 def query_ldap_with_paging(ldap_client, base_dn, search_filter, attributes, output_object=None, page_size=1000):
     """Get all the Active Directory results from LDAP using a paging approach.
@@ -377,13 +319,20 @@ def query_ldap_with_paging(ldap_client, base_dn, search_filter, attributes, outp
 
     return output_array
 
-def get_membership_with_ranges(ldap_client, base_dn, group_dn):
+def get_membership_with_ranges(ldap_client, base_dn, group_dn, primary_group_token, explode_nested_groups):
     """Queries the membership of an Active Directory group. For large groups Active Directory will
        Not return the full membership by default but will instead return partial results. Additional
        processing is needed to get the full membership."""
     output_array = []
 
-    membership_filter = '(&(|(objectcategory=user)(objectcategory=group)(objectcategory=computer))(memberof={0}))'.format(group_dn)
+    # RFC 4515 sanitation.
+    sanatized_group_dn = group_dn.replace('(', '\\28').replace(')', '\\29').replace('*', '\\2a').replace('\\', '\\5c')
+
+    if explode_nested_groups is True:
+        membership_filter = '(&(|(objectcategory=user)(objectcategory=group)(objectcategory=computer))(|(memberOf:1.2.840.113556.1.4.1941:={0})(primaryGroupID={1})))'.format(sanatized_group_dn, primary_group_token)
+    else:
+        membership_filter = '(&(|(objectcategory=user)(objectcategory=group)(objectcategory=computer))(|(memberOf={0})(primaryGroupID={1})))'.format(sanatized_group_dn, primary_group_token)
+
     membership_results = query_ldap_with_paging(ldap_client, base_dn, membership_filter, ['distinguishedName'])
 
     for element in membership_results:
@@ -400,7 +349,7 @@ if __name__ == '__main__':
     server_group.add_argument('-l', '--server', required=True, dest='ldap_server', help='IP address of the LDAP server.')
     server_group.add_argument('-d', '--domain', required=True, dest='domain', help='Authentication account\'s FQDN. If an alternative domain is not specified this will be also used as the Base DN for searching LDAP.')
     server_group.add_argument('-a', '--alt-domain', dest='alt_domain', help='Alternative FQDN to use as the Base DN for searching LDAP.')
-    server_group.add_argument('-e', '--nested', dest='nested_groups', action='store_true', help='Expand nested groups.')
+    server_group.add_argument('--online-nested', dest='nested_groups', action='store_true', help='Expand nested groups online using LDAP_MATCHING_RULE_IN_CHAIN.')
     authentication_group = parser.add_argument_group('Authentication Parameters')
     authentication_group.add_argument('-n', '--null', dest='null_session', action='store_true', help='Use a null binding to authenticate to LDAP.')
     authentication_group.add_argument('-s', '--secure', dest='secure_comm', action='store_true', help='Connect to LDAP over SSL')
