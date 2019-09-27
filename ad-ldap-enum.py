@@ -34,6 +34,7 @@ class ADUser(object):
     profile_path = ''
     locked_out = 'NO'
     logon_script = ''
+    info = ''
 
     def __init__(self, retrieved_attributes):
         if 'distinguishedName' in retrieved_attributes:
@@ -48,6 +49,8 @@ class ADUser(object):
             self.comment = retrieved_attributes['comment'][0].replace('\t', '*TAB*').replace('\r', '*CR*').replace('\n', '*LF*')
         if 'description' in retrieved_attributes:
             self.description = retrieved_attributes['description'][0].replace('\t', '*TAB*').replace('\r', '*CR*').replace('\n', '*LF*')
+        if 'info' in retrieved_attributes:
+            self.info = retrieved_attributes['info'][0].replace('\t', '*TAB*').replace('\r', '*CR*').replace('\n', '*LF*')
         if 'homeDirectory' in retrieved_attributes:
             self.home_directory = retrieved_attributes['homeDirectory'][0]
         if 'displayName' in retrieved_attributes:
@@ -122,7 +125,9 @@ class ADComputer(object):
     sam_account_name = ''
     primary_group_id = ''
     operating_system = ''
-    operating_system_hotfix = ''
+    operating_system_notes = ''
+    operating_system_description = ''
+    operating_system_ipv4address = ''
     operating_system_service_pack = ''
     operating_system_version = ''
 
@@ -135,8 +140,12 @@ class ADComputer(object):
             self.primary_group_id = retrieved_attributes['primaryGroupID'][0]
         if 'operatingSystem' in retrieved_attributes:
             self.operating_system = retrieved_attributes['operatingSystem'][0]
-        if 'operatingSystemHotfix' in retrieved_attributes:
-            self.operating_system_hotfix = retrieved_attributes['operatingSystemHotfix'][0]
+        if 'description' in retrieved_attributes:
+            self.operating_system_description = retrieved_attributes['description'][0]
+        if 'info' in retrieved_attributes:
+            self.operating_system_notes = retrieved_attributes['info'][0]
+        if 'ipv4address' in retrieved_attributes:
+            self.operating_system_ipv4address = retrieved_attributes['ipv4address'][0]
         if 'operatingSystemServicePack' in retrieved_attributes:
             self.operating_system_service_pack = retrieved_attributes['operatingSystemServicePack'][0]
         if 'operatingSystemVersion' in retrieved_attributes:
@@ -173,13 +182,13 @@ def ldap_queries(ldap_client, base_dn, explode_nested_groups):
 
     # LDAP filters
     user_filter = '(objectcategory=user)'
-    user_attributes = ['distinguishedName', 'sAMAccountName', 'userAccountControl', 'primaryGroupID', 'comment', 'description', 'homeDirectory', 'displayName', 'mail', 'pwdLastSet', 'lastLogon', 'profilePath', 'lockoutTime', 'scriptPath']
+    user_attributes = ['distinguishedName', 'sAMAccountName', 'userAccountControl', 'primaryGroupID', 'comment', 'description', 'info', 'homeDirectory', 'displayName', 'mail', 'pwdLastSet', 'lastLogon', 'profilePath', 'lockoutTime', 'scriptPath']
 
     group_filter = '(objectcategory=group)'
     group_attributes = ['distinguishedName', 'sAMAccountName', 'member', 'primaryGroupToken']
 
     computer_filters = '(objectcategory=computer)'
-    computer_attributes = ['distinguishedName', 'sAMAccountName', 'primaryGroupID', 'operatingSystem', 'operatingSystemHotfix', 'operatingSystemServicePack', 'operatingSystemVersion']
+    computer_attributes = ['distinguishedName', 'sAMAccountName', 'primaryGroupID', 'operatingSystem', 'description', 'notes','ipv4address']
 
     # LDAP queries
     logging.info('Querying users')
@@ -229,7 +238,7 @@ def ldap_queries(ldap_client, base_dn, explode_nested_groups):
     user_information_filename = '{0} Extended Domain User Information.tsv'.format(args.filename_prepend).strip()
     with open(user_information_filename, 'w') as user_information_file:
         logging.info('Writing domain user information to [%s]', user_information_file.name)
-        user_information_file.write('SAM Account Name\tStatus\tLocked Out\tDisplay Name\tEmail\tHome Directory\tProfile Path\tLogon Script Path\tPassword Last Set\tLast Logon\tUser Comment\tDescription\n')
+        user_information_file.write('SAM Account Name\tStatus\tLocked Out\tDisplay Name\tEmail\tHome Directory\tProfile Path\tLogon Script Path\tPassword Last Set\tLast Logon\tUser Comment\tDescription\tNotes\n')
 
         for user_object in users_dictionary.values():
             if user_object.primary_group_id and user_object.primary_group_id in group_id_to_dn_dictionary:
@@ -254,6 +263,7 @@ def ldap_queries(ldap_client, base_dn, explode_nested_groups):
                 temp_list_a.append(user_object.get_last_logon_date())
                 temp_list_a.append(user_object.comment)
                 temp_list_a.append(user_object.description)
+                temp_list_a.append(user_object.info)
                 _output_dictionary.append(temp_list_b)
 
                 user_information_file.write('\t'.join(temp_list_a[1:]) + '\n')
@@ -262,7 +272,7 @@ def ldap_queries(ldap_client, base_dn, explode_nested_groups):
     computer_information_filename = '{0} Extended Domain Computer Information.tsv'.format(args.filename_prepend).strip()
     with open(computer_information_filename, 'w') as computer_information_file:
         logging.info('Writing domain computer information to [%s]', computer_information_file.name)
-        computer_information_file.write('SAM Account Name\tOS\tOS Hotfix\tOS Service Pack\tOS Version\n')
+        computer_information_file.write('SAM Account Name\tOS\tOS Notes\nip4vaddress\tdescription\n')
 
         # TODO: This could create output duplicates. It should be fixed at some point.
         # Add computers if they have the group set as their primary ID as the group
@@ -278,7 +288,8 @@ def ldap_queries(ldap_client, base_dn, explode_nested_groups):
 
                 temp_list_b.append(computer_object.sam_account_name)
                 temp_list_b.append(computer_object.operating_system)
-                temp_list_b.append(computer_object.operating_system_hotfix)
+                temp_list_b.append(computer_object.operating_system_ipv4address)
+                temp_list_b.append(computer_object.operating_system_description)
                 temp_list_b.append(computer_object.operating_system_service_pack)
                 temp_list_b.append(computer_object.operating_system_version)
 
