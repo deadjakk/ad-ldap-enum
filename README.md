@@ -1,8 +1,9 @@
 # ad-ldap-enum
-An LDAP based Active Directory user and group enumeration tool
+An LDAP based Active Directory user and group enumeration tool.
 
-####Forked by deadjakk for the purposes of adding just a couple additional fields such as notes/info for users, and descriptions for computers
 ### About
+Forked by deadjakk for the purposes of adding just a couple additional fields such as notes/info for users, and descriptions for computers
+
 ad-ldap-enum is a Python script that was developed to discover users and their group memberships from Active Directory. In large Active Directory environments, tools such as NBTEnum were not performing fast enough. By executing LDAP queries against a domain controller, ad-ldap-enum is able to target specific Active Directory attributes and build out group membership quickly.
 
 ad-ldap-enum outputs three tab delimited files 'Domain Group Membership.tsv', 'Extended Domain User Information.tsv', and 'Extended Domain Computer Information.tsv'. The first file contains users, computers, groups, and their memberships. The second file contains users and extra information about the users from Active Directory (e.g. a user's home folder or email address). The third file contains devices in the Domain Computers group and extra information about them from Active Directory (e.g. operating system type and service pack version).
