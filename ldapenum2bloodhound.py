@@ -1,3 +1,4 @@
+# Author:: deadjakk
 import json,csv,argparse,StringIO,sys
 parser = argparse.ArgumentParser()
 parser.add_argument("-f",help="tsv file to be parsed into a bloodhound format")
