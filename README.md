@@ -3,6 +3,7 @@ An LDAP based Active Directory user and group enumeration tool.
 
 ### Purpose of fork
 Forked by deadjakk for the purposes of adding just a couple additional fields such as notes/info for users, and descriptions for computers
+Removed several domain computer properties and added a field for users along with a description field for computers
 
 ### About
 
