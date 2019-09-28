@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 
-# Author:: Eric DePree
+# Original Author:: Eric DePree
+# This fork by:: deadjakk
 # Date::   2015 - 2017
 
 """An LDAP Active Directory enumerator. The script queries Active Directory over LDAP for users, groups and computers.
