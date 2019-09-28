@@ -1,4 +1,7 @@
+#!/usr/bin/python
 # Author:: deadjakk
+# Purpose, parses the data from ad-ldap-enum into a format that is importable into Bloodhound
+# For use with the fork of ad-ldap-enum @ https://github.com/deadjakk/ad-ldap-enum
 import json,csv,argparse,StringIO,sys
 parser = argparse.ArgumentParser()
 parser.add_argument("-f",help="tsv file to be parsed into a bloodhound format")
