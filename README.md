@@ -1,8 +1,11 @@
 # ad-ldap-enum
 An LDAP based Active Directory user and group enumeration tool.
 
-### About
+### Purpose of fork
 Forked by deadjakk for the purposes of adding just a couple additional fields such as notes/info for users, and descriptions for computers
+Removed several domain computer properties and added a field for users along with a description field for computers
+
+### About
 
 ad-ldap-enum is a Python script that was developed to discover users and their group memberships from Active Directory. In large Active Directory environments, tools such as NBTEnum were not performing fast enough. By executing LDAP queries against a domain controller, ad-ldap-enum is able to target specific Active Directory attributes and build out group membership quickly.
 
