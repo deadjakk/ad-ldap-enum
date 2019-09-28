@@ -2,8 +2,10 @@
 An LDAP based Active Directory user and group enumeration tool.
 
 ### Purpose of fork
-Forked by deadjakk for the purposes of adding just a couple additional fields such as notes/info for users, and descriptions for computers
+Forked for the purposes of adding just a couple additional fields such as notes/info for users, and descriptions for computers
 Removed several domain computer properties and added a field for users along with a description field for computers
+
+Additionally, I've created a small bloodhound parser for the resulting files to allow them to be imported into a bloodhound database. This would give someone a quick body of data to work with in neo4j prior to extensive enumeration performed by the ingestor. This is helpful since the original ldap enum script runs in just a few minutes.
 
 ### About
 
