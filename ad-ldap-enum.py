@@ -273,7 +273,7 @@ def ldap_queries(ldap_client, base_dn, explode_nested_groups):
     computer_information_filename = '{0} Extended Domain Computer Information.tsv'.format(args.filename_prepend).strip()
     with open(computer_information_filename, 'w') as computer_information_file:
         logging.info('Writing domain computer information to [%s]', computer_information_file.name)
-        computer_information_file.write('SAM Account Name\tOS\tOS Notes\nip4vaddress\tdescription\n')
+        computer_information_file.write('SAM Account Name\tOS\tOS Notes\tip4vaddress\tdescription\n')
 
         # TODO: This could create output duplicates. It should be fixed at some point.
         # Add computers if they have the group set as their primary ID as the group

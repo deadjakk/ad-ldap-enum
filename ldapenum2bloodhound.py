@@ -2,16 +2,17 @@
 # Author:: deadjakk
 # Purpose, parses the data from ad-ldap-enum into a format that is importable into Bloodhound
 # For use with the fork of ad-ldap-enum @ https://github.com/deadjakk/ad-ldap-enum
-import json,csv,argparse,StringIO,sys
+import json,csv,argparse,StringIO,sys,glob
 parser = argparse.ArgumentParser()
 parser.add_argument("-f",help="tsv file to be parsed into a bloodhound format")
 parser.add_argument("-u",help="states the file being parsed is a user file",action="store_true")
+parser.add_argument("-a",'--auto',help="script will automatically look for json files with user,group,and computer in the names",action="store_true")
 parser.add_argument("-c",help="states the file being parsed is a computer file",action="store_true")
 parser.add_argument("-g",help="states the file being parsed is a group file",action="store_true")
 parser.add_argument("-d",help="specify the domain (some legacy domains use different domains)")
 parsed = parser.parse_args()
 
-if not parsed.f:
+if not parsed.f and not parsed.auto:
     print("[-]you must specify a file to be parsed\nuse --help for more info")
     sys.exit(1)
 
@@ -19,7 +20,7 @@ if not parsed.d:
     print("[-]you must specify a domain\nuse --help for more info")
     sys.exit(1)
 
-if not parsed.u and not parsed.c and not parsed.g: #TODO add additional filetypes
+if not parsed.auto and not parsed.u and not parsed.c and not parsed.g: #TODO add additional filetypes
     print("[-]you must specify the type of file that is being parsed\nuse --help for more info")
     sys.exit(1)
 
@@ -100,7 +101,7 @@ def parseComputers(filename,domain):
                         "highvalue": False,
                         "domain": domain 
                   },
-                  "Name": item["SAM Account"].replace("$",'').upper()+"."+domain, 
+                  "Name": item["SAM Account Name"].replace("$",'').upper()+"."+domain, 
                   "PrimaryGroup": None,
                   "LocalAdmins": [],
                   "RemoteDesktopUsers": [],
@@ -121,6 +122,7 @@ def parseComputers(filename,domain):
 
 
 def aggregateGroups(roster,domain):
+    # roster=roster[0:18]
     retgroups = {}
     keys = roster[0].keys()
     i = 0
@@ -141,7 +143,7 @@ def aggregateGroups(roster,domain):
                     "MemberName":user.upper(),
                     "MemberType":"user"
                     })
-        print("progress: {}/{} users".format(i,total))
+        print("progress: {}/{} user-group-bindings".format(i,total))
     return retgroups
             
 
@@ -174,7 +176,7 @@ def parseGroups(filename,domain):
         json.dump(jsonGroupData, fp)
 
 
-    metastring = "\"meta\":{\"type\":\"groups\",\"count\":%d}" % (int(len(groups.keys())))
+    metastring = "\"meta\":{\"type\":\"groups\",\"count\":%d}" % (int(validCount))
     print "Meta string:",metastring
     #Work around for bloodhound's json parsing prob:
     #https://github.com/BloodHoundAD/BloodHound/issues/254
@@ -182,13 +184,56 @@ def parseGroups(filename,domain):
     with open(groupFileName, 'r') as _file :
             filedata = _file.read()
 
-    filedata = filedata.replace('}]}', '}],%s}') % (metastring)
+    # filedata = filedata.replace('}]}', '}],%s}') % (metastring)
+    filedata = filedata[:-1]
+    filedata += ","
+    filedata += metastring
+    filedata += "}"
 
     with open(groupFileName, 'w') as _file:
             _file.write(filedata)
 
     print ("group file written to {}".format(groupFileName))
 
+if parsed.auto:
+    print("trying to determine the files to parse")
+    files = glob.glob("*.tsv")
+    for f in files:
+        if 'group' in f.lower():
+            groupfile = f
+        if 'user' in f.lower():
+            userfile = f
+        if 'computer' in f.lower():
+            compfile = f
+    print("found the following files\
+        \ngroup file ->    {}\
+        \nuser file ->     {}\
+        \ncomputer file -> {}".format(groupfile,userfile,compfile))
+
+    raw_input("if this looks correct hit enter>")
+
+    try:
+        print("parsing users")
+        parseUsers(userfile,parsed.d)
+    except Exception as e:
+        print("[-]failed to parse users:\n",e)
+        sys.exit(1)
+
+    try:
+        print("parsing computerss")
+        parseComputers(compfile,parsed.d)
+    except Exception as e:
+        print("[-]failed to parse computers:\n",e)
+        sys.exit(1)
+
+    print("parsing groups")
+    try:
+        parseGroups(groupfile,parsed.d)
+    except Exception as e:
+        print("[-]failed to parse groups:\n",e)
+        sys.exit(1)
+
+    sys.exit(0)
 
 if parsed.u:
     print("parsing users")
